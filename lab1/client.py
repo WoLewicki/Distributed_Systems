@@ -109,6 +109,49 @@ def create_random_passe():
         return 'passe' + str(r) + client_id + str(list_port)
 
 
+def process_start(data):
+    global nodes
+    nodes += 1
+    if data[5:7] == '01':  # start of communication, so no sense in putting anything on queue
+        if get_list_port(data) == nei_port:  # second person, he listens where we send
+            data = 'passe02' + client_id + list_port
+        else:
+            data = 'conne' + client_id + client_id + str(list_port) + str(get_list_port(data))
+    else:
+        news_queue.put(get_list_port(data))
+        return None
+    return data
+
+
+def process_conne(data):
+    global nodes
+    nodes += 1
+    if get_new_port(data) == int(list_port):  # got conne from before communication, send passe to prevent errors
+        data = create_random_passe()
+    elif get_list_port(data) == int(nei_port):
+        cid = data[5:7]
+        accept_new_client(data)
+        data = 'passe' + cid + client_id + str(list_port)
+    return data
+
+
+def process_passe(data):
+    global is_data_awaiting, data_awaiting
+    if not news_queue.empty():
+        is_data_awaiting = True
+        data_awaiting = data
+        data = 'conne' + client_id + client_id + str(list_port) + str(news_queue.get())
+    else:
+        if data[5:7] == client_id:
+            if is_data_awaiting:
+                print('There was data awaiting in ' + client_id)
+                is_data_awaiting = False
+                data = data_awaiting
+            else:
+                data = create_random_passe()
+    return data
+
+
 def prep_data(data):
     global nodes, data_awaiting, is_data_awaiting
     print('Got ' + data + ' in ' + client_id + ' (port ' + list_port + ')' + ' timestamp: ' + str(datetime.datetime.now()))
@@ -117,37 +160,7 @@ def prep_data(data):
         print(
             'Message came back to the sender, sending new passe msg in ' + client_id + ' (port ' + list_port + ')' + ' timestamp: ' + str(
                 datetime.datetime.now()))
-    if data[0:5] == 'start':
-        nodes += 1
-        if data[5:7] == '01':  # start of communication, so no sense in putting anything on queue
-            if get_list_port(data) == nei_port:  # second person, he listens where we send
-                data = 'passe02' + client_id + list_port
-            else:
-                data = 'conne' + client_id + client_id + str(list_port) + str(get_list_port(data))
-        else:
-            news_queue.put(get_list_port(data))
-            return None
-    elif data[0:5] == 'conne':
-        nodes += 1
-        if get_new_port(data) == int(list_port):  # got conne from before communication, send passe to prevent errors
-            data = create_random_passe()
-        elif get_list_port(data) == int(nei_port):
-            cid = data[5:7]
-            accept_new_client(data)
-            data = 'passe' + cid + client_id + str(list_port)
-    elif data[0:5] == 'passe':
-        if not news_queue.empty():
-            is_data_awaiting = True
-            data_awaiting = data
-            data = 'conne' + client_id + client_id + str(list_port) + str(news_queue.get())
-        else:
-            if data[5:7] == client_id:
-                if is_data_awaiting:
-                    print('There was data awaiting in ' + client_id)
-                    is_data_awaiting = False
-                    data = data_awaiting
-                else:
-                    data = create_random_passe()
+    data = proc_dict[data[0:5]](data)
     return data
 
 
@@ -203,6 +216,13 @@ def start_client(pr):
         else:
             join_ring_udp()
         process_data_udp()
+
+
+proc_dict = {
+    "start" : process_start,
+    "conne" : process_conne,
+    "passe" : process_passe
+}
 
 
 if len(sys.argv) == 6:
